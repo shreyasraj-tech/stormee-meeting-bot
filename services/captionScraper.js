@@ -1,9 +1,4 @@
 
-/**
- * services/captionScraper.js
- * 
- * This service is responsible for scraping captions from a post-meeting Google Meet page.
- */
 
 // const { chromium } = require('playwright');
 
@@ -15,6 +10,7 @@
  * @returns {Promise<string>} The extracted caption text
  * @throws {Error} If caption scraping fails
  */
+
 async function scrapeCaptions(meetingUrl) {
   console.log(`Starting caption scraping for URL: ${meetingUrl}`);
   
