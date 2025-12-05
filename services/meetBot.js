@@ -453,4 +453,33 @@ async function speak(meetingUrl, audioFilePath, playbackDuration = 8000) {
     console.log("✅ Speaker bot finished and exited cleanly.");
   }
   
-export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak };
+/**
+ * 💬 Send Message Function
+ * -------------------------
+ * Sends a message to the Google Meet chat using Playwright.
+ * Handles typing the message into the chat input and clicking the send button.
+ */
+async function sendMessage(page, message) {
+  console.log(`💬 Attempting to send message: "${message}"`);
+
+  const chatInputSelector = 'textarea[aria-label="Send a message to everyone"]';
+  const sendButtonSelector = 'button[aria-label="Send message"]';
+
+  try {
+    // Wait for the chat input to be visible
+    await page.waitForSelector(chatInputSelector, { timeout: 5000 });
+
+    // Type the message into the chat input
+    await page.fill(chatInputSelector, message);
+
+    // Click the send button
+    await page.click(sendButtonSelector);
+
+    console.log(`✅ Message sent successfully: "${message}"`);
+  } catch (error) {
+    console.error(`❌ Error sending message: ${error.message}. The selectors might be outdated or the chat might not be open.`);
+    throw new Error('Could not send message to Google Meet. Please ensure the chat is open.');
+  }
+}
+
+export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage };

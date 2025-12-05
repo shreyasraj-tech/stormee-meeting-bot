@@ -1,4 +1,5 @@
-import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions } from "../services/meetBot.js";
+import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage } from "../services/meetBot.js";
+import { getActiveMeetPage } from "../services/playwrightManager.js";
 
 let currentMeetingUrl = null;
 
@@ -64,4 +65,36 @@ const speakController=async(req,res)=>{
     }
 }
 
-export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController};
+const sendMessageController = async (req, res) => {
+  // Destructure message from request body
+  const { message } = req.body;
+
+  // Validate input: check if message is provided, is a string, and is not empty
+  if (!message || typeof message !== 'string' || message.trim() === '') {
+    return res.status(400).json({ error: 'Message is required and must be a non-empty string.' });
+  }
+
+  try {
+    // Retrieve the active Playwright page object
+    const page = getActiveMeetPage();
+
+    // Check if an active Google Meet session exists
+    if (!page) {
+      return res.status(503).json({ error: 'No active Google Meet session found.' });
+    }
+
+    // Call the service function to send the message
+    await sendMessage(page, message.trim());
+
+    // Send success response
+    res.status(200).json({ success: true, message: 'Message sent successfully.' });
+  } catch (error) {
+    // Log error for debugging purposes
+    console.error('Error in sendMessageController:', error);
+
+    // Send error response with appropriate status code
+    res.status(500).json({ error: error.message || 'An internal server error occurred.' });
+  }
+};
+
+export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController,sendMessageController};

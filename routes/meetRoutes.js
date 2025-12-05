@@ -1,5 +1,5 @@
 import express from "express";
-import { loginController, speakController, startAudioController, startCaptionsController, stopAudioController, stopCaptionsController } from "../controllers/meetController.js";
+import { loginController, speakController, startAudioController, startCaptionsController, stopAudioController, stopCaptionsController, sendMessageController } from "../controllers/meetController.js";
 
 const router = express.Router();
 
@@ -16,5 +16,12 @@ router.post('/playaudio', startAudioController);
 router.post('/signin',loginController);
 router.post('/pauseaudio',stopAudioController);
 router.post('/speak',speakController);
+
+/**
+ * @route   POST /api/meet/send-message
+ * @desc    Send a message to the Google Meet chat
+ * @access  Private (should be protected by auth middleware)
+ */
+router.post('/send-message', sendMessageController);
 
 export default router;
