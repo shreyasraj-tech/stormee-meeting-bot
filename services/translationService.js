@@ -1,9 +1,4 @@
 
-/**
- * services/translationService.js
- * 
- * This service acts as a wrapper for an external translation API.
- */
 
 // const { TranslationServiceClient } = require('@google-cloud/translate');
 
