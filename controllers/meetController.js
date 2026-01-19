@@ -1,5 +1,6 @@
 import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage } from "../services/meetBot.js";
 import { getActiveMeetPage } from "../services/playwrightManager.js";
+import { processTranscript } from "../services/TaskService.js";
 
 let currentMeetingUrl = null;
 
@@ -15,6 +16,7 @@ const startCaptionsController = async (req, res) => {
 const stopCaptionsController = async (req, res) => {
   try {
     const captions = await stopCaptions();
+    processTranscript(captions).catch(error => console.error('Error processing transcript:', error));
     res.json({ message: "Captions stopped", captions });
   } catch (err) {
     res.status(500).json({ error: "Failed to stop captions" });

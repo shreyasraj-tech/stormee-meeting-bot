@@ -22,6 +22,7 @@ router.post('/speak',speakController);
  * @desc    Send a message to the Google Meet chat
  * @access  Private (should be protected by auth middleware)
  */
-router.post('/send-message', sendMessageController);
+
+router.post('/send-message', authMiddleware, sendMessageController);
 
 export default router;
