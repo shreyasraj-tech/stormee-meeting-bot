@@ -16,7 +16,14 @@ const startCaptionsController = async (req, res) => {
 const stopCaptionsController = async (req, res) => {
   try {
     const captions = await stopCaptions();
-    processTranscript(captions).catch(error => console.error('Error processing transcript:', error));
+    // For a more robust solution, consider a job queue:
+// await transcriptQueue.add('process-transcript', { captions });
+
+// For a minimal improvement, ensure the error is tracked:
+processTranscript(captions).catch(error => {
+  console.error('Error processing transcript:', error);
+  // TODO: Add monitoring/alerting here (e.g., Sentry, DataDog)
+}); 
     res.json({ message: "Captions stopped", captions });
   } catch (err) {
     res.status(500).json({ error: "Failed to stop captions" });

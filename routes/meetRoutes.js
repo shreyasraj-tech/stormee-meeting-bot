@@ -1,6 +1,9 @@
 import express from "express";
 import { loginController, speakController, startAudioController, startCaptionsController, stopAudioController, stopCaptionsController, sendMessageController } from "../controllers/meetController.js";
 
+import { authMiddleware } from '../middleware/auth.js'; // Assuming the middleware is in '../middleware/auth.js'
+import { authMiddleware } from '../middleware/auth.js'; // Example path, please adjust
+router.post('/send-message', authMiddleware, sendMessageController);
 const router = express.Router();
 
 // Health check route

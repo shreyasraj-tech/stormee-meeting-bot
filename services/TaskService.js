@@ -1,8 +1,7 @@
-
 import { OpenAI } from 'openai';
 import { Octokit } from 'octokit';
 
-// Initialize API clients with environment variables
+// Initialize API clients
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -11,131 +10,130 @@ const octokitClient = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 });
 
+// ---------------------------------------------------------
+// CONFIGURATION & MAPPINGS
+// ---------------------------------------------------------
+
+// Map spoken names to actual GitHub usernames
+const GITHUB_USER_MAP = {
+  "Shreyas": "shreyas-gh-handle",
+  "Alex": "alex-dev",
+  "Sarah": "sarah-codes"
+  // Add more team members here
+};
+
+// ---------------------------------------------------------
+// CORE FUNCTIONS
+// ---------------------------------------------------------
+
 /**
  * Process meeting transcript using OpenAI LLM
- * Extracts summary and action items from captions
- * @param {Array} captions - Array of caption objects with speaker and text properties
- * @returns {Promise<Object>} - Object containing summary and actionItems
+ * @param {string} transcriptText - The raw text of the meeting
+ * @returns {Promise<Object>} - { summary, actionItems }
  */
-async function processTranscript(captions) {
+async function processTranscript(transcriptText) {
+  console.log("🧠 Sending transcript to LLM for analysis...");
+
+  const SYSTEM_PROMPT = `
+    You are a Meeting Assistant. Your job is to extract a summary and actionable tasks.
+    
+    RETURN JSON ONLY. The structure must be:
+    {
+      "summary": "Brief summary...",
+      "actionItems": [
+        { 
+          "task": "Action title", 
+          "assignee": "Name (extracted from context)", 
+          "priority": "High/Medium/Low", 
+          "type": "Bug/Feature/Documentation/Other" 
+        }
+      ]
+    }
+  `;
+
   try {
-    // Format captions into a single string
-    const transcriptText = captions
-      .map((caption) => `${caption.speaker}: ${caption.text}`)
-      .join('\n');
-
-    // Create prompt for LLM to analyze transcript
-    const prompt = `Analyze the following meeting transcript and extract a summary and action items. Return a JSON object with two properties:
-1. "summary": A brief summary of the meeting (2-3 sentences)
-2. "actionItems": An array of action items, each with properties: "task" (description of the task), "assignee" (person responsible), "priority" (high/medium/low), and "type" (bug/feature/documentation/other)
-
-Meeting Transcript:
-${transcriptText}
-
-Return ONLY valid JSON, no additional text.`;
-
-    // Call OpenAI API
     const response = await openaiClient.chat.completions.create({
-      model: process.env.LLM_MODEL || 'gpt-4o',
+      model: process.env.LLM_MODEL || 'gpt-4-turbo', // Turbo supports JSON mode best
+      response_format: { type: "json_object" }, // <--- CRITICAL: Enforces valid JSON
       messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `TRANSCRIPT:\n${transcriptText}` },
       ],
+      temperature: 0.2, // Low temperature for consistent results
     });
 
-    // Extract response text
-    const responseText = response.choices[0].message.content;
+    const parsedResponse = JSON.parse(response.choices[0].message.content);
 
-    // Parse JSON response
-    const parsedResponse = JSON.parse(responseText);
-
-    // Validate that actionItems array exists
-    if (!Array.isArray(parsedResponse.actionItems)) {
-      throw new Error('Invalid response format: actionItems must be an array');
+    // Validate response
+    if (!parsedResponse.actionItems || !Array.isArray(parsedResponse.actionItems)) {
+      console.warn("⚠️ No action items found or invalid format.");
+      parsedResponse.actionItems = [];
     }
 
-    // Create GitHub issues for each action item
-    for (const actionItem of parsedResponse.actionItems) {
-      await createGitHubIssue(
-        actionItem.task,
-        actionItem.assignee,
-        actionItem.priority,
-        actionItem.type
-      );
+    // Process Action Items (Parallel Execution)
+    if (parsedResponse.actionItems.length > 0) {
+      console.log(`🚀 syncing ${parsedResponse.actionItems.length} tasks to GitHub...`);
+      await syncTasksToGitHub(parsedResponse.actionItems);
     }
 
-    console.log('✅ Transcript processed successfully');
     return parsedResponse;
+
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      console.error('❌ Error parsing LLM response:', error.message);
-    } else if (error.message.includes('API')) {
-      console.error('❌ Error processing transcript with LLM:', error.message);
-    } else {
-      console.error('❌ Error processing transcript:', error.message);
-    }
-    throw error;
+    console.error('❌ Error in processTranscript:', error.message);
+    throw error; // Re-throw to be handled by caller
   }
 }
 
 /**
- * Create a GitHub issue for an action item
- * @param {string} task - Task description
- * @param {string} assignee - Person responsible for the task
- * @param {string} priority - Priority level (high/medium/low)
- * @param {string} type - Issue type (bug/feature/documentation/other)
- * @returns {Promise<void>}
+ * Handles the loop of creating multiple issues
  */
-async function createGitHubIssue(task, assignee, priority, type) {
+async function syncTasksToGitHub(actionItems) {
+  // Use allSettled so one failure doesn't stop the others
+  const results = await Promise.allSettled(
+    actionItems.map(item => createGitHubIssue(item))
+  );
+
+  // Log results
+  const successful = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.filter(r => r.status === 'rejected').length;
+  console.log(`✅ Sync Complete: ${successful} created, ${failed} failed.`);
+}
+
+/**
+ * Create a single GitHub issue
+ */
+async function createGitHubIssue({ task, assignee, priority, type }) {
+  const repoPath = process.env.GITHUB_REPO; // Format: "owner/repo"
+  if (!repoPath) throw new Error('GITHUB_REPO env var missing');
+  const [owner, repo] = repoPath.split('/');
+
+  // Resolve Assignee (Name -> GitHub Username)
+  const ghUsername = GITHUB_USER_MAP[assignee] || null;
+  if (assignee && !ghUsername) {
+    console.warn(`⚠️ Warning: Could not map name "${assignee}" to a GitHub user. Issue will be unassigned.`);
+  }
+
+  // Construct Labels
+  const labels = [
+    `priority: ${priority?.toLowerCase() || 'medium'}`, 
+    `type: ${type?.toLowerCase() || 'task'}`,
+    'bot-created'
+  ];
+
   try {
-    // Extract repository owner and name from environment variable
-    const repoPath = process.env.GITHUB_REPO;
-    if (!repoPath) {
-      throw new Error('GITHUB_REPO environment variable is not set');
-    }
-
-    const [owner, repo] = repoPath.split('/');
-    if (!owner || !repo) {
-      throw new Error('GITHUB_REPO must be in format: owner/repo');
-    }
-
-    // Map priority and type to GitHub labels
-    const priorityLabel = `priority-${priority?.toLowerCase() || 'medium'}`;
-    const typeLabel = mapTypeToLabel(type);
-    const labels = [priorityLabel, typeLabel].filter(Boolean);
-
-    // Create GitHub issue
     const issue = await octokitClient.rest.issues.create({
       owner,
       repo,
       title: task,
+      body: `**Assignee:** ${assignee}\n**Source:** Stormee Bot\n\n*Generated automatically from meeting.*`,
       labels,
-      assignees: assignee && assignee.trim() ? [assignee.trim()] : [],
+      assignees: ghUsername ? [ghUsername] : [],
     });
-
-    console.log(`✅ GitHub issue created: #${issue.data.number} - ${task}`);
+    console.log(`   -> Issue #${issue.data.number} created: "${task}"`);
   } catch (error) {
-    console.error('❌ Error creating GitHub issue:', error.message);
+    console.error(`   -> Failed to create issue "${task}":`, error.message);
     throw error;
   }
 }
 
-/**
- * Map issue type to GitHub label
- * @param {string} type - Issue type
- * @returns {string} - GitHub label
- */
-function mapTypeToLabel(type) {
-  const typeMap = {
-    bug: 'bug',
-    feature: 'feature',
-    documentation: 'documentation',
-    other: 'task',
-  };
-  return typeMap[type?.toLowerCase()] || 'task';
-}
-
-export { processTranscript, createGitHubIssue };
-
+export { processTranscript };

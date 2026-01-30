@@ -19,7 +19,7 @@
     "express": "^5.1.0",
     "nodemon": "^3.1.10",
     "playwright": "^1.56.0",
-    "openai": "^4.20.1",
-    "octokit": "^3.1.2"
+    "openai": "4.20.1",
+    "octokit": "3.1.2"
   }
 }
