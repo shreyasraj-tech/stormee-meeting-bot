@@ -1,6 +1,8 @@
-import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage } from "../services/meetBot.js";
+import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript } from "../services/meetBot.js";
 import { getActiveMeetPage } from "../services/playwrightManager.js";
 import { processTranscript } from "../services/TaskService.js";
+import { getMeetingSummary } from "../services/ecgService.js";
+import { sendSummary } from "../services/emailService.js";
 
 let currentMeetingUrl = null;
 
@@ -36,7 +38,11 @@ const loginController=async(req,res)=>{
       
         currentMeetingUrl = meetingUrl;
         joinMeeting(meetingUrl)
-          .then(() => console.log("Joined meeting"))
+          .then(() => {
+            console.log("Joined meeting");
+            // Start monitoring participant count and trigger endMeetingController when only 1 participant remains
+            startParticipantMonitoring(endMeetingController);
+          })
           .catch((err) => console.error(err));
           res.json({message:"Meeting joined"})
     }
@@ -106,4 +112,47 @@ const sendMessageController = async (req, res) => {
   }
 };
 
-export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController,sendMessageController};
+const endMeetingController = async (req, res) => {
+  try {
+    // Stop the participant monitoring interval
+    stopParticipantMonitoring();
+
+    // Stop captions and retrieve the meeting transcript
+    const transcript = await stopCaptions();
+
+    // Transform the transcript array into a formatted text string
+    // Each transcript object contains speaker and text properties
+    const transcriptText = transcript
+      .map(item => `${item.speaker}: ${item.text}`)
+      .join('\n');
+
+    // Call the eCG.AI service to generate a summary from the transcript
+    const summary = await getMeetingSummary(transcriptText);
+
+    // Retrieve the recipient email address from the request body
+    // This comes from the initial API request that started the bot session
+    const { recipientEmail } = req.body;
+
+    // Send the summary email to the recipient
+    await sendSummary(recipientEmail, summary);
+
+    // Get the browser instance
+    const browser = getBrowser();
+
+    // Close the browser instance if it exists
+    if (browser) {
+      await browser.close();
+    }
+
+    // Send success response
+    res.status(200).json({ message: 'Meeting ended and summary sent.' });
+  } catch (error) {
+    // Log the error for debugging purposes
+    console.error('Error in endMeetingController:', error);
+
+    // Send error response with appropriate status code
+    res.status(500).json({ error: 'Failed to end meeting.' });
+  }
+};
+
+export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController,sendMessageController,endMeetingController};

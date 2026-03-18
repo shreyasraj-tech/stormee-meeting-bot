@@ -7,6 +7,8 @@ const AUTH_PATH = path.resolve("auth.json");
 let browser, context, page;
 let captionsSegments = [];
 let scrapingActive = false;
+let meetingTranscript = [];
+let participantCheckInterval = undefined;
 
 async function ensureAuthSession(meetingUrl) {
   browser = await chromium.launch({
@@ -200,6 +202,11 @@ async function scrapeCaptions(page) {
       };
       console.log(`🗣️ ${JSON.stringify(segment, null, 2)}`);
       segments.push(segment);
+      // Push caption data to meetingTranscript array
+      meetingTranscript.push({
+        speaker,
+        text: trimmedCaption,
+      });
       index++;
       captionsLastSeenAt = Date.now();
     }
@@ -286,6 +293,52 @@ async function scrapeCaptions(page) {
     }, 3000);
   });
 }
+async function startParticipantMonitoring(endMeetingCallback) {
+  participantCheckInterval = setInterval(async () => {
+    if (!page) return;
+
+    try {
+      const participantCount = await page.evaluate(() => {
+        const element = document.querySelector('.uGOf1d');
+        if (!element) return 0;
+        const text = element.innerText;
+        return parseInt(text, 10) || 0;
+      });
+
+      if (participantCount === 1) {
+        // Set a timeout to verify participant count is still 1 after 30 seconds
+        setTimeout(async () => {
+          try {
+            const finalCount = await page.evaluate(() => {
+              const element = document.querySelector('.uGOf1d');
+              if (!element) return 0;
+              const text = element.innerText;
+              return parseInt(text, 10) || 0;
+            });
+
+            if (finalCount === 1) {
+              console.log("👥 Only 1 participant remaining. Ending meeting...");
+              endMeetingCallback();
+            }
+          } catch (err) {
+            console.error('Error checking final participant count:', err);
+          }
+        }, 30000);
+      }
+    } catch (err) {
+      console.error('Error checking participant count:', err);
+    }
+  }, 5000);
+}
+
+function stopParticipantMonitoring() {
+  clearInterval(participantCheckInterval);
+}
+
+function getBrowser() {
+  return browser;
+}
+
 async function turnCaptionsOn(page) {
   console.log("⏳ Waiting for Google Meet interface to load...");
   // await page.waitForSelector('[aria-label*="More options"]', { timeout: 60000 });
@@ -482,4 +535,4 @@ async function sendMessage(page, message) {
   }
 }
 
-export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage };
+export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript };

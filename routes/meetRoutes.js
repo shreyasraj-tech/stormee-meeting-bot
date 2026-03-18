@@ -1,5 +1,5 @@
 import express from "express";
-import { loginController, speakController, startAudioController, startCaptionsController, stopAudioController, stopCaptionsController, sendMessageController } from "../controllers/meetController.js";
+import { loginController, speakController, startAudioController, startCaptionsController, stopAudioController, stopCaptionsController, sendMessageController, endMeetingController } from "../controllers/meetController.js";
 
 import { authMiddleware } from '../middleware/auth.js'; // Assuming the middleware is in '../middleware/auth.js'
 import { authMiddleware } from '../middleware/auth.js'; // Example path, please adjust
@@ -19,6 +19,7 @@ router.post('/playaudio', startAudioController);
 router.post('/signin',loginController);
 router.post('/pauseaudio',stopAudioController);
 router.post('/speak',speakController);
+router.post('/end-meeting', endMeetingController);
 
 /**
  * @route   POST /api/meet/send-message

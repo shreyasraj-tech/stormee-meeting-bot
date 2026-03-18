@@ -14,9 +14,12 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "axios": "^1.7.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "html-to-text": "^9.0.5",
+    "nodemailer": "^6.9.13",
     "nodemon": "^3.1.10",
     "playwright": "^1.56.0",
     "openai": "4.20.1",
