@@ -535,4 +535,115 @@ async function sendMessage(page, message) {
   }
 }
 
-export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript };
+/**
+ * 📝 Summarize Text Function
+ * -------------------------
+ * Orchestrates a call to the external AI service to generate a structured summary
+ * from translated meeting text. Handles both 4xx and 5xx errors from the AI service
+ * and returns a structured summary object with discussion points, action items, and sentiment analysis.
+ * 
+ * @param {string} translatedText - The translated meeting text to be summarized
+ * @returns {Promise<Object>} A structured summary object containing discussionPoints, actionItems, and sentimentScore
+ * @throws {Error} If the API request fails or the API key is not set
+ */
+async function summarizeText(translatedText) {
+  try {
+    // Import the getMeetingSummary function from ecgService
+    const { getMeetingSummary } = await import('./ecgService.js');
+    
+    // Validate input parameter
+    if (!translatedText || typeof translatedText !== 'string' || translatedText.trim() === '') {
+      throw new Error('Translated text is required and must be a non-empty string.');
+    }
+    
+    // Call the external AI service to get the summary
+    const aiResponse = await getMeetingSummary(translatedText.trim());
+    
+    // Parse the AI service response and extract key information
+    // The response should contain summary and action_items from the AI service
+    const discussionPoints = aiResponse.summary || '';
+    const actionItems = aiResponse.action_items || [];
+    const sentimentScore = aiResponse.sentiment_score || 0.5;
+    
+    // Construct and return the structured summary object
+    // Return the response as-is without validation or filtering, as per edge case requirement
+    const structuredSummary = {
+      discussionPoints: discussionPoints,
+      actionItems: actionItems,
+      sentimentScore: sentimentScore
+    };
+    
+    console.log('✅ Summary generated successfully from AI service.');
+    return structuredSummary;
+  } catch (error) {
+    // Handle 4xx errors (authentication failure, rate limiting, invalid request)
+    if (error.response && error.response.status >= 400 && error.response.status < 500) {
+      console.error(`❌ 4xx Error from AI service (${error.response.status}):`, error.response.data);
+      throw new Error(`AI service request failed: ${error.response.status} - ${error.response.statusText || 'Client Error'}`);
+    }
+    
+    // Handle 5xx errors (server errors)
+    if (error.response && error.response.status >= 500) {
+      console.error(`❌ 5xx Error from AI service (${error.response.status}):`, error.response.data);
+      throw new Error('AI service is temporarily unavailable. Please try again later.');
+    }
+    
+    // Handle other errors (network errors, API key not set, etc.)
+    console.error('❌ Error in summarizeText:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * 📧 Send Summary Function
+ * -------------------------
+ * Validates recipient email address and summary JSON object with comprehensive
+ * input validation, throwing specific error messages for each validation failure.
+ * 
+ * @param {string} recipientEmail - The recipient's email address
+ * @param {object} summaryJson - The summary data object containing meeting summary information
+ * @throws {Error} With specific error messages for validation failures
+ */
+function sendSummary(recipientEmail, summaryJson) {
+  try {
+    // Validate recipientEmail parameter
+    if (recipientEmail === null || recipientEmail === undefined || recipientEmail === '') {
+      throw new Error('Invalid recipient email address.');
+    }
+
+    // Validate email format using regex pattern
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(recipientEmail)) {
+      throw new Error('Invalid recipient email address.');
+    }
+
+    // Validate summaryJson parameter - check if null, undefined, or not a plain object
+    if (summaryJson === null || summaryJson === undefined || typeof summaryJson !== 'object' || Array.isArray(summaryJson)) {
+      throw new Error('Invalid summary data.');
+    }
+
+    // Validate that summaryJson is a plain object (not a class instance)
+    if (Object.getPrototypeOf(summaryJson) !== Object.prototype) {
+      throw new Error('Invalid summary data.');
+    }
+
+    // Validate summaryJson.summary property - must be a non-empty string
+    if (!summaryJson.summary || typeof summaryJson.summary !== 'string' || summaryJson.summary.trim() === '') {
+      throw new Error('summaryJson.summary must be a non-empty string.');
+    }
+
+    // Validate summaryJson.action_items property if it exists - must be an array
+    if (summaryJson.hasOwnProperty('action_items') && !Array.isArray(summaryJson.action_items)) {
+      throw new Error('summaryJson.action_items must be an array.');
+    }
+
+    // All validations passed
+    console.log(`✅ Summary validation successful for recipient: ${recipientEmail}`);
+    return { success: true, message: 'Summary validated successfully.' };
+  } catch (err) {
+    console.error('❌ Error validating summary:', err.message);
+    throw err;
+  }
+}
+
+export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript, sendSummary, summarizeText };

@@ -1,5 +1,31 @@
 import { OpenAI } from 'openai';
 import { Octokit } from 'octokit';
+import fs from 'fs';
+import path from 'path';
+
+// ---------------------------------------------------------
+// STARTUP VALIDATION
+// ---------------------------------------------------------
+
+/**
+ * Validate that all required environment variables are set
+ * Throws descriptive error if any are missing
+ */
+function validateEnvironmentVariables() {
+  const requiredVars = ['OPENAI_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPO'];
+  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    throw new Error(
+      `❌ Missing required environment variables: ${missingVars.join(', ')}. ` +
+      `Please ensure these are set in your .env file before starting the service.`
+    );
+  }
+  console.log('✅ All required environment variables validated.');
+}
+
+// Validate on module load
+validateEnvironmentVariables();
 
 // Initialize API clients
 const openaiClient = new OpenAI({

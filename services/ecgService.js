@@ -55,4 +55,3 @@ async function getMeetingSummary(transcriptText) {
 
 // Export the function using ES6 named export syntax
 export { getMeetingSummary };
-

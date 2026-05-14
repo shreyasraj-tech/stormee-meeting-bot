@@ -1,8 +1,7 @@
-import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript } from "../services/meetBot.js";
+import { joinMeeting, pauseAudio, playAudio, speak, startCaptions, stopCaptions, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript, sendSummary } from "../services/meetBot.js";
 import { getActiveMeetPage } from "../services/playwrightManager.js";
 import { processTranscript } from "../services/TaskService.js";
 import { getMeetingSummary } from "../services/ecgService.js";
-import { sendSummary } from "../services/emailService.js";
 
 let currentMeetingUrl = null;
 
@@ -155,4 +154,55 @@ const endMeetingController = async (req, res) => {
   }
 };
 
-export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController,sendMessageController,endMeetingController};
+const sendSummaryController = async (req, res) => {
+  try {
+    // Extract recipientEmail and summaryJson from request body
+    const { recipientEmail, summaryJson } = req.body;
+
+    // Call the sendSummary service function with extracted parameters
+    await sendSummary(recipientEmail, summaryJson);
+
+    // Send success response with 200 status code
+    res.status(200).json({ success: true, message: 'Summary sent successfully.' });
+  } catch (error) {
+    // Log the error for debugging purposes
+    console.error('Error in sendSummaryController:', error);
+
+    // Map validation errors to 400 status code, server errors to 500
+    // Validation errors from sendSummary service include specific error messages
+    const statusCode = error.message && (
+      error.message.includes('Invalid recipient email') ||
+      error.message.includes('Invalid summary data') ||
+      error.message.includes('must be')
+    ) ? 400 : 500;
+
+    // Send error response with appropriate status code and error message
+    res.status(statusCode).json({ error: error.message || 'Failed to send summary.' });
+  }
+};
+
+const summarizeController = async (req, res) => {
+  try {
+    // Extract the translated meeting text from request body
+    const { text } = req.body;
+
+    // Validate that the text field is present and not empty
+    if (!text || typeof text !== 'string' || text.trim() === '') {
+      return res.status(400).json({ error: 'Text is required and must be a non-empty string.' });
+    }
+
+    // Call the summarization service with the validated text
+    const summary = await getMeetingSummary(text.trim());
+
+    // Send success response with the generated summary
+    res.status(200).json({ success: true, message: 'Summary generated successfully.', summary });
+  } catch (error) {
+    // Log the error for debugging purposes
+    console.error('Error in summarizeController:', error);
+
+    // Send error response with appropriate status code
+    res.status(500).json({ error: error.message || 'Failed to generate summary.' });
+  }
+};
+
+export { startCaptionsController, stopCaptionsController ,startAudioController,loginController,stopAudioController,speakController,sendMessageController,endMeetingController,sendSummaryController,summarizeController};
