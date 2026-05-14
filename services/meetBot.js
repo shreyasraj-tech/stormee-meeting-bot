@@ -7,6 +7,8 @@ const AUTH_PATH = path.resolve("auth.json");
 let browser, context, page;
 let captionsSegments = [];
 let scrapingActive = false;
+let meetingTranscript = [];
+let participantCheckInterval = undefined;
 
 async function ensureAuthSession(meetingUrl) {
   browser = await chromium.launch({
@@ -200,6 +202,11 @@ async function scrapeCaptions(page) {
       };
       console.log(`🗣️ ${JSON.stringify(segment, null, 2)}`);
       segments.push(segment);
+      // Push caption data to meetingTranscript array
+      meetingTranscript.push({
+        speaker,
+        text: trimmedCaption,
+      });
       index++;
       captionsLastSeenAt = Date.now();
     }
@@ -286,6 +293,52 @@ async function scrapeCaptions(page) {
     }, 3000);
   });
 }
+async function startParticipantMonitoring(endMeetingCallback) {
+  participantCheckInterval = setInterval(async () => {
+    if (!page) return;
+
+    try {
+      const participantCount = await page.evaluate(() => {
+        const element = document.querySelector('.uGOf1d');
+        if (!element) return 0;
+        const text = element.innerText;
+        return parseInt(text, 10) || 0;
+      });
+
+      if (participantCount === 1) {
+        // Set a timeout to verify participant count is still 1 after 30 seconds
+        setTimeout(async () => {
+          try {
+            const finalCount = await page.evaluate(() => {
+              const element = document.querySelector('.uGOf1d');
+              if (!element) return 0;
+              const text = element.innerText;
+              return parseInt(text, 10) || 0;
+            });
+
+            if (finalCount === 1) {
+              console.log("👥 Only 1 participant remaining. Ending meeting...");
+              endMeetingCallback();
+            }
+          } catch (err) {
+            console.error('Error checking final participant count:', err);
+          }
+        }, 30000);
+      }
+    } catch (err) {
+      console.error('Error checking participant count:', err);
+    }
+  }, 5000);
+}
+
+function stopParticipantMonitoring() {
+  clearInterval(participantCheckInterval);
+}
+
+function getBrowser() {
+  return browser;
+}
+
 async function turnCaptionsOn(page) {
   console.log("⏳ Waiting for Google Meet interface to load...");
   // await page.waitForSelector('[aria-label*="More options"]', { timeout: 60000 });
@@ -453,4 +506,144 @@ async function speak(meetingUrl, audioFilePath, playbackDuration = 8000) {
     console.log("✅ Speaker bot finished and exited cleanly.");
   }
   
-export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak };
+/**
+ * 💬 Send Message Function
+ * -------------------------
+ * Sends a message to the Google Meet chat using Playwright.
+ * Handles typing the message into the chat input and clicking the send button.
+ */
+async function sendMessage(page, message) {
+  console.log(`💬 Attempting to send message: "${message}"`);
+
+  const chatInputSelector = 'textarea[aria-label="Send a message to everyone"]';
+  const sendButtonSelector = 'button[aria-label="Send message"]';
+
+  try {
+    // Wait for the chat input to be visible
+    await page.waitForSelector(chatInputSelector, { timeout: 5000 });
+
+    // Type the message into the chat input
+    await page.fill(chatInputSelector, message);
+
+    // Click the send button
+    await page.click(sendButtonSelector);
+
+    console.log(`✅ Message sent successfully: "${message}"`);
+  } catch (error) {
+    console.error(`❌ Error sending message: ${error.message}. The selectors might be outdated or the chat might not be open.`);
+    throw new Error('Could not send message to Google Meet. Please ensure the chat is open.');
+  }
+}
+
+/**
+ * 📝 Summarize Text Function
+ * -------------------------
+ * Orchestrates a call to the external AI service to generate a structured summary
+ * from translated meeting text. Handles both 4xx and 5xx errors from the AI service
+ * and returns a structured summary object with discussion points, action items, and sentiment analysis.
+ * 
+ * @param {string} translatedText - The translated meeting text to be summarized
+ * @returns {Promise<Object>} A structured summary object containing discussionPoints, actionItems, and sentimentScore
+ * @throws {Error} If the API request fails or the API key is not set
+ */
+async function summarizeText(translatedText) {
+  try {
+    // Import the getMeetingSummary function from ecgService
+    const { getMeetingSummary } = await import('./ecgService.js');
+    
+    // Validate input parameter
+    if (!translatedText || typeof translatedText !== 'string' || translatedText.trim() === '') {
+      throw new Error('Translated text is required and must be a non-empty string.');
+    }
+    
+    // Call the external AI service to get the summary
+    const aiResponse = await getMeetingSummary(translatedText.trim());
+    
+    // Parse the AI service response and extract key information
+    // The response should contain summary and action_items from the AI service
+    const discussionPoints = aiResponse.summary || '';
+    const actionItems = aiResponse.action_items || [];
+    const sentimentScore = aiResponse.sentiment_score || 0.5;
+    
+    // Construct and return the structured summary object
+    // Return the response as-is without validation or filtering, as per edge case requirement
+    const structuredSummary = {
+      discussionPoints: discussionPoints,
+      actionItems: actionItems,
+      sentimentScore: sentimentScore
+    };
+    
+    console.log('✅ Summary generated successfully from AI service.');
+    return structuredSummary;
+  } catch (error) {
+    // Handle 4xx errors (authentication failure, rate limiting, invalid request)
+    if (error.response && error.response.status >= 400 && error.response.status < 500) {
+      console.error(`❌ 4xx Error from AI service (${error.response.status}):`, error.response.data);
+      throw new Error(`AI service request failed: ${error.response.status} - ${error.response.statusText || 'Client Error'}`);
+    }
+    
+    // Handle 5xx errors (server errors)
+    if (error.response && error.response.status >= 500) {
+      console.error(`❌ 5xx Error from AI service (${error.response.status}):`, error.response.data);
+      throw new Error('AI service is temporarily unavailable. Please try again later.');
+    }
+    
+    // Handle other errors (network errors, API key not set, etc.)
+    console.error('❌ Error in summarizeText:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * 📧 Send Summary Function
+ * -------------------------
+ * Validates recipient email address and summary JSON object with comprehensive
+ * input validation, throwing specific error messages for each validation failure.
+ * 
+ * @param {string} recipientEmail - The recipient's email address
+ * @param {object} summaryJson - The summary data object containing meeting summary information
+ * @throws {Error} With specific error messages for validation failures
+ */
+function sendSummary(recipientEmail, summaryJson) {
+  try {
+    // Validate recipientEmail parameter
+    if (recipientEmail === null || recipientEmail === undefined || recipientEmail === '') {
+      throw new Error('Invalid recipient email address.');
+    }
+
+    // Validate email format using regex pattern
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(recipientEmail)) {
+      throw new Error('Invalid recipient email address.');
+    }
+
+    // Validate summaryJson parameter - check if null, undefined, or not a plain object
+    if (summaryJson === null || summaryJson === undefined || typeof summaryJson !== 'object' || Array.isArray(summaryJson)) {
+      throw new Error('Invalid summary data.');
+    }
+
+    // Validate that summaryJson is a plain object (not a class instance)
+    if (Object.getPrototypeOf(summaryJson) !== Object.prototype) {
+      throw new Error('Invalid summary data.');
+    }
+
+    // Validate summaryJson.summary property - must be a non-empty string
+    if (!summaryJson.summary || typeof summaryJson.summary !== 'string' || summaryJson.summary.trim() === '') {
+      throw new Error('summaryJson.summary must be a non-empty string.');
+    }
+
+    // Validate summaryJson.action_items property if it exists - must be an array
+    if (summaryJson.hasOwnProperty('action_items') && !Array.isArray(summaryJson.action_items)) {
+      throw new Error('summaryJson.action_items must be an array.');
+    }
+
+    // All validations passed
+    console.log(`✅ Summary validation successful for recipient: ${recipientEmail}`);
+    return { success: true, message: 'Summary validated successfully.' };
+  } catch (err) {
+    console.error('❌ Error validating summary:', err.message);
+    throw err;
+  }
+}
+
+export { startCaptions, stopCaptions, playAudio, joinMeeting, pauseAudio, speak, sendMessage, getBrowser, startParticipantMonitoring, stopParticipantMonitoring, meetingTranscript, sendSummary, summarizeText };
